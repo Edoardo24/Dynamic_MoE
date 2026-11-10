@@ -22,6 +22,26 @@ expert spawning. The folder covers the full pipeline: VAE latent caching, base
 model training, MoE training with clustering and online spawning, synthetic
 dataset generation and evaluation by FID and by downstream classification
 (Macro-F1).
+## Method overview
+
+### Pipeline
+
+![Pipeline overview](docs/overview.png)
+
+Chest X-rays are encoded into latent space by a frozen VAE, and the pathology labels are turned into text prompts and encoded by a frozen T5 encoder. A frozen DiT backbone denoises the latents conditioned on the prompt. The only trained part is a small MoE-LoRA adapter (about 4.7M parameters) inserted into one transformer block. Generated latents are decoded back into synthetic X-rays, which are evaluated by FID and by training a downstream multi-label classifier (Macro-F1).
+
+### MoE-LoRA adapter
+
+![MoE-LoRA adapter](docs/experts.png)
+
+The adapter sits next to the frozen feed-forward network of the chosen block and adds its output residually, so the base model stays unchanged. A timestep-aware router assigns each latent token (not each image) to its top-k experts. Each expert is a rank-16 LoRA adapter (down-projection, GELU, up-projection), and the expert outputs are combined as a weighted sum. Routing per token lets experts specialise on the small regions that contain a finding instead of on the healthy anatomy shared by all images.
+
+### Dynamic expert spawning
+
+![Dynamic expert spawning loop](docs/spawn.png)
+
+The number of experts grows during training. After each epoch, tokens the router is unsure about (high routing entropy and high reconstruction error) are added to a buffer. At scheduled spawn epochs the buffered tokens are clustered. If a compact, distinct cluster is found, a new expert is trained offline on those tokens, given a warm start in the router and synchronised with the EMA weights before training continues. If no compact cluster is found, training continues with the current experts.
+
 
 ### `residual_error_moe/`: residual-routing study
 
